@@ -27,3 +27,4 @@ Packages/
 Package.resolved
 .swiftpm
 *.xcodeproj
+.claude

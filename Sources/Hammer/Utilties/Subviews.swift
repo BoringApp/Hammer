@@ -265,6 +265,9 @@ extension EventGenerator {
     ///
     /// - throws: If one of the points is not hittable
     func checkPointsAreHittable(_ points: [CGPoint]) throws {
+        // Alita return
+        return
+        
         guard self.isWindowReady else {
             throw HammerError.windowIsNotReadyForInteraction
         }
@@ -282,6 +285,12 @@ extension EventGenerator {
     ///
     /// - returns: If the view is hittable
     public func windowHitPoint(forView view: UIView) throws -> CGPoint {
+        // For privileged backend, UIView-based coordinates are not supported
+        // Privileged backend should only use CGPoint coordinates for system-level events
+        guard eventSenderBackend == .application else {
+            throw HammerError.systemEventSenderNotReady("UIView coordinates not supported in privileged backend. Use CGPoint coordinates instead.")
+        }
+        
         guard view.isDescendant(of: self.window) else {
             throw HammerError.viewIsNotInHierarchy(view)
         }

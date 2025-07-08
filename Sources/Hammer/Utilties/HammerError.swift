@@ -21,6 +21,8 @@ public enum HammerError: Error {
     case unsupportedTouchPhase(UITouch.Phase)
 
     case unableToAccessPrivateApi(type: String, method: String)
+    case systemEventSenderNotReady(String)
+    case invalidEventSenderBackend
 
     case viewIsNotInHierarchy(UIView)
     case viewIsNotVisible(UIView)
@@ -69,6 +71,10 @@ extension HammerError: CustomStringConvertible {
             return "Unsupported touch phase \(phase)"
         case .unableToAccessPrivateApi(let type, let method):
             return "Unable to access private API in \(type): \"\(method)\""
+        case .systemEventSenderNotReady(let message):
+            return "System event sender not ready: \(message)"
+        case .invalidEventSenderBackend:
+            return "Invalid event sender backend: privileged backend is required for system-level events"
         case .viewIsNotInHierarchy(let view):
             return "View is not in hierarchy: \(view.shortDescription)"
         case .viewIsNotVisible(let view):

@@ -51,6 +51,8 @@ struct IOHID {
     typealias IOHIDEventSystemClientRegisterEventCallback = @convention(c) (
         _ client: IOHIDEventSystemClient, _ callback: @escaping IOHIDEventSystemClientEventCallback,
         _ target: Any?, _ refcon: Any?) -> Void
+    typealias IOHIDEventSystemClientDispatchEvent = @convention(c) (
+        _ client: IOHIDEventSystemClient, _ event: IOHIDEvent) -> Void
 
     typealias IOHIDEventGetIntegerValue = @convention(c) (
         _ event: IOHIDEvent, _ field: UInt32) -> Int
@@ -78,6 +80,7 @@ struct IOHID {
     let eventSystemClientCreate: IOHIDEventSystemClientCreate
     let eventSystemClientScheduleWithRunLoop: IOHIDEventSystemClientScheduleWithRunLoop
     let eventSystemClientRegisterEventCallback: IOHIDEventSystemClientRegisterEventCallback
+    let eventSystemClientDispatchEvent: IOHIDEventSystemClientDispatchEvent
 
     let eventGetIntegerValue: IOHIDEventGetIntegerValue
     let eventSetIntegerValue: IOHIDEventSetIntegerValue
@@ -112,6 +115,9 @@ struct IOHID {
         self.eventSystemClientRegisterEventCallback
             = unsafeBitCast(dlsym(handle, "IOHIDEventSystemClientRegisterEventCallback"),
                             to: IOHIDEventSystemClientRegisterEventCallback.self)
+        self.eventSystemClientDispatchEvent
+            = unsafeBitCast(dlsym(handle, "IOHIDEventSystemClientDispatchEvent"),
+                            to: IOHIDEventSystemClientDispatchEvent.self)
 
         self.eventGetIntegerValue = unsafeBitCast(dlsym(handle, "IOHIDEventGetIntegerValue"),
                                                   to: IOHIDEventGetIntegerValue.self)

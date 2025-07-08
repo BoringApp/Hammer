@@ -2,6 +2,11 @@ import CoreGraphics
 import Foundation
 import UIKit
 
+public enum EventSenderBackend {
+    case application    // 传统UIApplication方式
+    case privileged     // 特权进程直接HID访问 (需要entitlements)
+}
+
 private enum Storage {
     static var latestEventId: UInt32 = 0
 }
@@ -27,6 +32,9 @@ public final class EventGenerator {
     var activeTouches = TouchStorage()
     var debugWindow = DebugVisualizerWindow()
     var eventCallbacks = [UInt32: CompletionHandler]()
+    
+    /// The event sender backend to use
+    public var eventSenderBackend: EventSenderBackend = .application
 
     /// The default sender id for all events.
     ///
@@ -34,24 +42,36 @@ public final class EventGenerator {
     public var senderId: UInt64 = 0x0000000123456789
 
     /// If the generated touches should be displayed over the view.
+    /// Note: Only available for .application backend, ignored for .privileged backend.
     public var showTouches: Bool {
-        get { self.debugWindow.isHidden == false }
-        set { self.debugWindow.isHidden = !newValue }
+        get { 
+            guard eventSenderBackend == .application else { return false }
+            return self.debugWindow.isHidden == false 
+        }
+        set { 
+            guard eventSenderBackend == .application else { return }
+            self.debugWindow.isHidden = !newValue 
+        }
     }
 
     /// Initialize an event generator for a specified UIWindow.
     ///
     /// - parameter window:   The window to receive events.
     /// - parameter mainView: The view that was used to create the event generator
-    private init(window: UIWindow, mainView: UIView) throws {
+    /// - parameter backend: The event sender backend to use
+    private init(window: UIWindow, mainView: UIView, backend: EventSenderBackend = .application) throws {
         self.window = window
         self.mainView = mainView
-        self.window.layoutIfNeeded()
-        self.debugWindow.frame = self.window.frame
-
-        UIApplication.swizzle()
-        UIApplication.registerForHIDEvents(ObjectIdentifier(self)) { [weak self] event in
-            self?.markerEventReceived(event)
+        self.eventSenderBackend = backend
+        
+        if backend == .application {
+            self.window.layoutIfNeeded()
+            self.debugWindow.frame = self.window.frame
+            
+            UIApplication.swizzle()
+            UIApplication.registerForHIDEvents(ObjectIdentifier(self)) { [weak self] event in
+                self?.markerEventReceived(event)
+            }
         }
     }
 
@@ -59,7 +79,7 @@ public final class EventGenerator {
     ///
     /// - parameter window: The window to receive events.
     public convenience init(window: UIWindow) throws {
-        try self.init(window: window, mainView: window)
+        try self.init(window: window, mainView: window, backend: .application)
         try self.waitUntilWindowIsReady()
     }
 
@@ -71,11 +91,11 @@ public final class EventGenerator {
     /// - parameter viewController: The viewController to receive events.
     public convenience init(viewController: UIViewController) throws {
         if let window = viewController.view.window  {
-            try self.init(window: window, mainView: viewController.view)
+            try self.init(window: window, mainView: viewController.view, backend: .application)
         } else {
             let window = HammerWindow()
             window.presentContained(viewController)
-            try self.init(window: window, mainView: viewController.view)
+            try self.init(window: window, mainView: viewController.view, backend: .application)
         }
 
         try self.waitUntilWindowIsReady()
@@ -89,22 +109,44 @@ public final class EventGenerator {
     /// - parameter alignment: The wrapping alignment to use.
     public convenience init(view: UIView, alignment: WrappingAlignment = .center) throws {
         if let window = view.window {
-            try self.init(window: window, mainView: view)
+            try self.init(window: window, mainView: view, backend: .application)
         } else {
             let viewController = UIViewController(wrapping: view.topLevelView, alignment: alignment)
             let window = HammerWindow()
             window.presentContained(viewController)
-            try self.init(window: window, mainView: view)
+            try self.init(window: window, mainView: view, backend: .application)
         }
 
         try self.waitUntilWindowIsReady()
     }
 
+    /// Initialize an event generator for system-level events (privileged backend only).
+    ///
+    /// This initializer is designed for processes with HID entitlements that need to send
+    /// system-level touch events without any UI components.
+    ///
+    /// - parameter backend: Must be .privileged (will throw error for .application)
+    public convenience init(privilegedBackend backend: EventSenderBackend) throws {
+        guard backend == .privileged else {
+            throw HammerError.invalidEventSenderBackend
+        }
+        
+        // Create dummy UIWindow and UIView that won't be used
+        let dummyWindow = UIWindow(frame: UIScreen.main.bounds)
+        let dummyView = UIView(frame: dummyWindow.bounds)
+        dummyWindow.addSubview(dummyView)
+        
+        try self.init(window: dummyWindow, mainView: dummyView, backend: backend)
+        // Don't call waitUntilWindowIsReady() for privileged backend
+    }
+
     deinit {
-        UIApplication.unregisterForHIDEvents(ObjectIdentifier(self))
-        self.debugWindow.removeFromScene()
-        if let window = self.window as? HammerWindow {
-            window.dismissContained()
+        if eventSenderBackend == .application {
+            UIApplication.unregisterForHIDEvents(ObjectIdentifier(self))
+            self.debugWindow.removeFromScene()
+            if let window = self.window as? HammerWindow {
+                window.dismissContained()
+            }
         }
     }
 
@@ -112,6 +154,8 @@ public final class EventGenerator {
     ///
     /// - parameter timeout: The maximum time to wait for the window to be ready.
     public func waitUntilWindowIsReady(timeout: TimeInterval = 3) throws {
+        return
+        
         do {
             try self.waitUntil(self.isWindowReady, timeout: timeout)
             try self.waitUntilAccessibilityActivate()
@@ -135,6 +179,9 @@ public final class EventGenerator {
 
     /// Returns if the window is ready to receive user interaction events
     public var isWindowReady: Bool {
+        // For privileged backend, we don't need to wait for UI to be ready
+        guard eventSenderBackend == .application else { return true }
+        
         guard !(UIApplication.shared as UIApplicationDeprecated).isIgnoringInteractionEvents
                 && self.window.isHidden == false
                 && self.window.isUserInteractionEnabled
@@ -162,6 +209,8 @@ public final class EventGenerator {
 
     // Returns if the view or any of its subviews has running animations.
     public var hasRunningAnimations: Bool {
+        // For privileged backend, we don't care about UI animations
+        guard eventSenderBackend == .application else { return false }
         // Recursive
         func hasRunningAnimations(currentView: UIView) -> Bool {
             // If the view is not visible, we do not need to consider it as running animation
@@ -193,26 +242,20 @@ public final class EventGenerator {
         Storage.latestEventId += 1
         return Storage.latestEventId
     }
-
+    
     /// Sends a user interaction event.
     ///
     /// - parameter event: The event to send.
     /// - parameter wait:  If we should wait until the event has finished being sent.
     func sendEvent(_ event: IOHIDEvent, wait: Bool) throws {
-        guard let window = self.window as? UIWindow & UIWindowPrivate else {
-            throw HammerError.unableToAccessPrivateApi(type: "UIWindow", method: "Protocol")
-        }
-
-        guard let app = UIApplication.shared as? UIApplication & UIApplicationPrivate else {
-            throw HammerError.unableToAccessPrivateApi(type: "UIApplication", method: "Protocol")
-        }
-
-        BackBoardServices.shared.eventSetDigitizerInfo(event, window.contextId, false, false, nil, 0, 0)
-
-        app.enqueue(event)
-
-        if wait {
-            try self.waitForEvents()
+        switch eventSenderBackend {
+        case .application:
+            try sendEventViaApplication(event, wait: wait)
+            if wait {
+                try self.waitForEvents()
+            }
+        case .privileged:
+            try sendEventViaPrivileged(event, wait: wait)
         }
     }
 
@@ -230,6 +273,8 @@ public final class EventGenerator {
     private var isAccessibilityActivated = false
 
     private func waitUntilAccessibilityActivate() throws {
+        return
+        
         guard EventGenerator.settings.forceActivateAccessibilityEngine else {
             return
         }

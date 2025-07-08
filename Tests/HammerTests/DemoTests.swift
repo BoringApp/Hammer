@@ -4,7 +4,7 @@ import XCTest
 import MapKit
 
 /// These are skipped by default because they're too slow
-private let kSkipDemoTests = true
+private let kSkipDemoTests = false
 
 private let kMapDefaultCoordinate = CLLocationCoordinate2D(latitude: 37.773972, longitude: -122.431297)
 private let kMapDefaultCoordinateDistance = CLLocationDistance(100000)
@@ -21,6 +21,8 @@ final class DemoTests: XCTestCase {
         let eventGenerator = try EventGenerator(view: view)
         try eventGenerator.waitUntilHittable(timeout: 1)
         try eventGenerator.wait(0.5)
+
+        eventGenerator.showTouches = true
 
         XCTAssertEqual(view.isOn, false)
         try eventGenerator.fingerDown(at: view.frame.center.offset(x: -20, y: 0))
